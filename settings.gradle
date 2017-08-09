@@ -1,0 +1,1 @@
+include ':app', ':ICERAPI', ':android_serial_port_api'

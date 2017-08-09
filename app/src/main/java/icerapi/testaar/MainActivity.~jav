@@ -1,0 +1,561 @@
+package icerapi.testaar;
+
+import android.app.AlertDialog;
+import android.app.Dialog;
+import android.content.Context;
+import android.content.DialogInterface;
+import android.content.res.AssetManager;
+import android.media.MediaRecorder;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.support.v7.app.AppCompatActivity;
+import android.os.Bundle;
+import android.util.Log;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.widget.AdapterView;
+import android.widget.AdapterView.OnItemSelectedListener;
+import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.Spinner;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import org.dom4j.Document;
+import org.dom4j.DocumentHelper;
+import org.dom4j.Element;
+import org.dom4j.io.OutputFormat;
+import org.dom4j.io.XMLWriter;
+import org.xml.sax.XMLReader;
+
+
+import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.StringWriter;
+import java.io.UnsupportedEncodingException;
+import java.io.Writer;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Enumeration;
+
+
+import icerapi.icerapi.Api;
+import icerapi.icerapi.Com;
+
+
+public class MainActivity extends AppCompatActivity {
+    Api mApi;
+    Button mICERAPIButton;
+    Button mCopyXMLButton;
+    //SetPara
+    Button mSetPara;
+    Dialog SetPara;
+    //SetPara
+    String mApplicationPath;
+    String mOutputString = "";
+    String mFinalOutputString = "";
+    EditText mMoneyEdit;
+    Spinner mTransactionTypeSpinner;
+    String[] mTransactionTypeString = {"296000:票卡查詢", "606100:扣款", "801061:加值", "881799:SignOnQuery", "881899:ResetOffline", "881999:SignOn"};
+    String mMoney;
+    String mTransactionType;
+    TextView mOutput;
+    final String TAG = "TestAAR";
+    final int timeout = 10;
+    //thread
+    private Handler mUI_Handler = new Handler();
+    private Handler mThreadHandler;
+    private HandlerThread mThread;
+    String[] sICERParName = {"LogFlag","DLLVersion","TCPIPTimeOut","LogCnt","ComPort","ECC_IP","ECC_Port","ICER_IP","ICER_Port","CMAS_IP","CMAS_Port","TMLocationID","TMID","TMAgentNumber","LocationID","NewLocationID","SPID","NewSPID","Slot","BaudRate","OpenCom","MustSettleDate","ReaderMode","BatchFlag","OnlineFlag","ICERDataFlag","MessageHeader","DLLMode","AutoLoadMode","MaxALAmt","Dev_Info","TCPIP_SSL","CMASAdviceVerify"};
+    String[] sICERParValue = new String[sICERParName.length];
+    /**
+     * ATTENTION: This was auto-generated to implement the App Indexing API.
+     * See https://g.co/AppIndexing/AndroidStudio for more information.
+     */
+    private GoogleApiClient client;
+
+    //thread
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        mApplicationPath = MainActivity.this.getFilesDir().toString();
+        Log.d(TAG, "mApplicationPath: " + mApplicationPath);
+
+        mICERAPIButton = (Button) findViewById(R.id.ICERAPI_exe);
+        mCopyXMLButton = (Button) findViewById(R.id.copyXML);
+        //SetPara
+        mSetPara = (Button) findViewById(R.id.SetPara);
+        //SetPara
+        mOutput = (TextView) findViewById(R.id.output);
+        mTransactionTypeSpinner = (Spinner) findViewById(R.id.transactionType);
+        mMoneyEdit = (EditText) findViewById(R.id.money);
+        mMoney = mMoneyEdit.getText().toString();
+        ArrayAdapter<String> TransactionType = new ArrayAdapter<String>(MainActivity.this, android.R.layout.simple_spinner_item, mTransactionTypeString);
+        mTransactionTypeSpinner.setAdapter(TransactionType);
+
+        mTransactionTypeSpinner.setOnItemSelectedListener(new OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                mTransactionType = mTransactionTypeString[position].substring(0,6);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+                mTransactionType = mTransactionTypeString[0].substring(0,6);
+            }
+        });
+        //thread
+        mThread = new HandlerThread("name");
+        mThread.start();
+        mThreadHandler = new Handler(mThread.getLooper());
+        //thread
+        mICERAPIButton.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                //初始化
+                mFinalOutputString = "";
+                mOutputString = "";
+                mOutput.setText("");
+                //Toast.makeText(MainActivity.this,"執行ICERAPI---timeout: "+timeout+"秒",Toast.LENGTH_LONG).show();
+                //交易金額
+                mMoney = mMoneyEdit.getText().toString();
+                Log.d(TAG, "Transaction = " + mTransactionType + "   " + "Money = " + mMoney);
+                //thread
+                createXML();
+                mThreadHandler.post(ICERAPI_exe);
+                //thread
+            }
+        });
+        mCopyXMLButton.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                //call ICER_API
+                inFileProcess("ICERINI.xml");
+                inFileProcess("ICERAPI.REQ");
+                inFileProcess("BLC02200A_121209.BIG");
+                deleteExistFile(mApplicationPath + "/ICERAPI_CMAS.rev");
+                deleteExistFile(mApplicationPath + "/ICERAPI_CMAS.adv");
+
+                //show file on Toast
+                //++++++++++++++++++++
+                //showFileOnToast("ICERINI.xml",true);
+                //showFileOnToast("ICERAPI.REQ", true);
+                //++++++++++++++++++++
+            }
+        });
+        //SetPara
+        mSetPara.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                LayoutInflater inflater = LayoutInflater.from(MainActivity.this);
+                final View view = inflater.inflate((R.layout.dialog), null);
+
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("參數修改")
+                        .setView(view)
+                        .setPositiveButton("確定", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                //Toast.makeText(MainActivity.this,"SetPara OK",Toast.LENGTH_SHORT).show();
+                                Log.d(TAG, "Create Parameter");
+                                //Log.d(TAG, "" + ((EditText) view.findViewById(R.id.ComPort)).getText().toString());
+                                vdGetParaDataFromDialog(view);
+                                createParameter();
+                            }
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            }
+        });
+        //SetPara
+        // ATTENTION: This was auto-generated to implement the App Indexing API.
+        // See https://g.co/AppIndexing/AndroidStudio for more information.
+        client = new GoogleApiClient.Builder(this).addApi(AppIndex.API).build();
+    }
+
+    private Runnable ICERAPI_exe = new Runnable() {
+
+        public void run() {
+            int inTime;
+            //delete ICERAPI.RES.OK   ICERAPI.RES
+            deleteExistFile(mApplicationPath + "/ICERAPI.RES.OK");
+            deleteExistFile(mApplicationPath + "/ICERAPI.RES");
+            //call ICER_API
+            Log.d(TAG, "Call ICERAPI---timeout=" + timeout);
+            //Log.d(TAG, "Environment.getExternalStorageDirectory().getAbsolutePath()=" + Environment.getExternalStorageDirectory().getAbsolutePath());
+            mApi = new Api(MainActivity.this.getFilesDir().toString(),Environment.getExternalStorageDirectory().getAbsolutePath(), MainActivity.this);
+            /*try {
+                            Thread.sleep(timeout*1000);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }*/
+            //showMessage ICERAPI.RES
+            inTime = 0;
+            while (true) {
+                File file = new File(mApplicationPath + "/ICERAPI.RES.OK");
+                if (file.exists()) {
+                    String[] result = new String[6];
+                    mOutputString = showFileOnToast("ICERAPI.RES", false);
+                    for (int i = 0; i <= 6; i++) {
+                        if (mOutputString.contains("T390" + i)) {
+                            int start = mOutputString.indexOf("T390" + i);
+                            int end = mOutputString.indexOf("/T390" + i);
+                            result[i] = mOutputString.substring(start + 6, end - 1);
+                            Log.d(TAG, "start: " + start + "/end: " + end);
+                            Log.d(TAG, "i = " + i + " result= " + result[i]);
+                            mFinalOutputString += "T390" + i + " =  " + result[i] + "\n";
+                        }
+                    }
+                    Log.d(TAG, "output = " + mFinalOutputString);
+                    mUI_Handler.post(setUI);
+                    break;
+                }
+
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                inTime += 50;
+
+                if (inTime >= timeout * 1000)
+                    break;
+            }
+        }
+    };
+    private Runnable setUI = new Runnable() {
+
+        public void run() {
+            Toast.makeText(MainActivity.this, mFinalOutputString, Toast.LENGTH_LONG).show();
+            mOutput.setText(mOutputString);
+        }
+
+    };
+
+
+    private void CreateXMLFile() {
+        Document document = DocumentHelper.createDocument();
+        //添加节点信息
+        Element rootElement = document.addElement("TransXML");
+        Element element = rootElement.addElement("module");
+
+        Element nameElement = element.addElement("name");
+        Element valueElement = element.addElement("value");
+        Element descriptionElement = element.addElement("description");
+        nameElement.setText("名称");
+        nameElement.addAttribute("language", "java");//为节点添加属性值
+        valueElement.setText("值");
+        valueElement.addAttribute("language", "c#");
+        descriptionElement.setText("描述");
+        descriptionElement.addAttribute("language", "sql server");
+        System.out.println(document.asXML()); //将document文档对象直接转换成字符串输出
+        Writer fileWriter = null;
+        try {
+            fileWriter = new FileWriter(MainActivity.this.getFilesDir() + "/test.xml");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        //dom4j提供了专门写入文件的对象XMLWriter
+        XMLWriter xmlWriter = new XMLWriter(fileWriter);
+        try {
+            xmlWriter.write(document);
+            xmlWriter.flush();
+            xmlWriter.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        //Read File
+        FileReader fileReader = null;
+        try {
+            fileReader = new FileReader(MainActivity.this.getFilesDir() + "/test.xml");
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
+        BufferedReader br = new BufferedReader(fileReader);
+        String temp = null;
+        String result = "";
+        try {
+            temp = br.readLine();
+            while (temp != null) {
+                result += temp;
+                temp = br.readLine();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void inFileProcess(String bFileName) {
+        //讀取檔案
+        AssetManager assetManager = getAssets();
+        InputStream in = null;
+        OutputStream out = null;
+        byte[] buffer = new byte[1024];
+        int read;
+
+        try {
+            in = assetManager.open(bFileName);
+            File outFile = new File(mApplicationPath, bFileName);
+            out = new FileOutputStream(outFile);
+
+            while((read = in.read(buffer)) != -1){
+                out.write(buffer, 0, read);
+            }
+
+            in.close();
+            in = null;
+            out.flush();
+            out.close();
+            out = null;
+
+        } catch (IOException e) {
+            Log.e("tag", "Failed to copy asset file: " + bFileName, e);
+        }
+    }
+
+    public String showFileOnToast(String bFileName, Boolean showToast) {
+        FileInputStream in = null;
+        StringBuffer data = new StringBuffer();
+        try {
+            //開啟 getFilesDir() 目錄底下名稱為 test.txt 檔案
+            in = openFileInput(bFileName);
+            //讀取該檔案的內容
+            BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(in, "utf-8"));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                data.append(line + "\n");
+                //Log.d(TAG, "line: " + line+"\n");
+            }
+        } catch (Exception e) {
+            ;
+        } finally {
+            try {
+                in.close();
+            } catch (Exception e) {
+                ;
+            }
+        }
+        if (showToast)
+            Toast.makeText(MainActivity.this, data.toString(), Toast.LENGTH_SHORT).show();
+        return data.toString();
+    }
+
+    public void deleteExistFile(String bFileName) {
+        File file = new File(bFileName);
+        Log.d(TAG, "deleteFile: " + bFileName);
+        if (file.exists())
+            file.delete();
+    }
+
+    public String sBuildXMLTagValue(int inTableCnt,String sTag,String sVlaue)
+    {
+        String sStr = "";
+        int i;
+
+        for(i=0;i<inTableCnt;i++)
+            sStr += "\t";
+
+        sStr += "<" + sTag + ">" + sVlaue + "</" + sTag + ">" + "\n";
+        Log.e("sBuildXMLTagValue", "sStr: " + sStr);
+        return sStr;
+    }
+
+    public void createXML() {
+        FileOutputStream out = null;
+        String tempString = "";
+
+        try {
+            out = openFileOutput("ICERAPI.REQ", Context.MODE_PRIVATE);
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
+        //header
+        tempString = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?> \n";
+        tempString += "<TransXML>\n";
+        tempString += "\t<TRANS>\n";
+
+        //T0100 //Message Type
+        tempString += sBuildXMLTagValue(2,"T0100","0800");
+        /*tempString += "\t\t<T0100>";
+                tempString += "0800";
+                tempString += "</T0100>\n";*/
+
+        //T0300 //交易類別
+        tempString += sBuildXMLTagValue(2,"T0300",mTransactionType);
+        /*tempString += "\t\t<T0300>";
+        tempString += mTransactionType;
+        tempString += "</T0300>\n";*/
+
+        if (mTransactionType == "606100" || mTransactionType == "801061") {
+            //T0400 //金額
+            tempString += sBuildXMLTagValue(2,"T0400",mMoney + "00");
+            /*tempString += "\t\t<T0400>";
+            tempString += mMoney + "00";
+            tempString += "</T0400>\n";*/
+        }
+        //T1100 T1200 時間
+        SimpleDateFormat sdFormat;
+        Date date;
+        String strDate = "";
+        sdFormat = new SimpleDateFormat("HHmmss");
+        date = new Date();
+        strDate = sdFormat.format(date);
+        for (int i = 1; i <= 2; i++) {
+            tempString += sBuildXMLTagValue(2,"T1" + i + "00",strDate);
+            /*tempString += "\t\t<T1" + i + "00>";
+            tempString += strDate;
+            tempString += "</T1" + i + "00>\n";*/
+        }
+
+        //T1300 日期
+        strDate = "";
+        sdFormat = new SimpleDateFormat("yyyyMMdd");
+        strDate = sdFormat.format(date);
+        tempString += sBuildXMLTagValue(2, "T1300", strDate);
+        /*tempString += "\t\t<T1300>";
+        tempString += strDate;
+        tempString += "</T1300>\n";*/
+
+        //if(mTransactionType != "881799" && mTransactionType != "881899" && mTransactionType != "881999")
+        {
+            //T4108
+            tempString += sBuildXMLTagValue(2,"T4108","0");
+            /*tempString += "\t\t<T4108>";
+            tempString += "0";
+            tempString += "</T4108>\n";*/
+        }
+
+        //T4830
+        tempString += sBuildXMLTagValue(2,"T4830","0");
+        /*tempString += "\t\t<T4830>";
+        tempString += "0";
+        tempString += "</T4830>\n";*/
+
+        //T5501
+        tempString += sBuildXMLTagValue(2,"T5501","000001");
+        /*tempString += "\t\t<T5501>";
+        tempString += "000001";
+        tempString += "</T5501>\n";*/
+
+        //T5503//TM Location ID
+        tempString += sBuildXMLTagValue(2,"T5503","0000100001");
+        /*tempString += "\t\t<T5503>";
+        tempString += "0000100001";
+        tempString += "</T5503>\n";*/
+
+        tempString += "\t</TRANS>\n";
+        tempString += "</TransXML>\n";
+        //將資料寫入檔案中
+        try {
+            out.write(tempString.toString().getBytes());
+            out.flush();
+            out.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        //showFileOnToast("ICERAPI.REQ",true);
+    }
+
+    public void vdGetParaDataFromDialog(View vDialogView)
+    {
+        int i,inResID;
+
+        sICERParValue[0] = "1";
+        sICERParValue[1] = "2";
+        sICERParValue[2] = "10";
+        sICERParValue[3] = "30";
+        for(i=4;i<sICERParName.length;i++)
+        {
+            inResID = getResources().getIdentifier(sICERParName[i], "id", "icerapi.testaar");
+            sICERParValue[i] = ((EditText) vDialogView.findViewById(inResID)).getText().toString();
+        }
+    }
+
+    public void createParameter() {
+        FileOutputStream out = null;
+        String tempString = "";
+        int i;
+
+        try {
+            out = openFileOutput("ICERIINI.xml", Context.MODE_PRIVATE);
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
+        //header
+        tempString = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?> \n";
+        tempString += "<TransXML>\n";
+        tempString += "\t<TRANS>\n";
+
+        for(i=4;i<sICERParName.length;i++)
+        {
+            tempString += sBuildXMLTagValue(2,sICERParName[i], sICERParValue[i]);
+        }
+        //Log.d("createParameter:",tempString);
+
+        tempString += "\t</TRANS>\n";
+        tempString += "</TransXML>\n";
+        //將資料寫入檔案中
+        try {
+            out.write(tempString.toString().getBytes());
+            out.flush();
+            out.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        //showFileOnToast("ICERIINI.xml",true);
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+
+        // ATTENTION: This was auto-generated to implement the App Indexing API.
+        // See https://g.co/AppIndexing/AndroidStudio for more information.
+        client.connect();
+        Action viewAction = Action.newAction(
+                Action.TYPE_VIEW, // TODO: choose an action type.
+                "Main Page", // TODO: Define a title for the content shown.
+                // TODO: If you have web page content that matches this app activity's content,
+                // make sure this auto-generated web page URL is correct.
+                // Otherwise, set the URL to null.
+                Uri.parse("http://host/path"),
+                // TODO: Make sure this auto-generated app deep link URI is correct.
+                Uri.parse("android-app://icerapi.testaar/http/host/path")
+        );
+        AppIndex.AppIndexApi.start(client, viewAction);
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+
+        // ATTENTION: This was auto-generated to implement the App Indexing API.
+        // See https://g.co/AppIndexing/AndroidStudio for more information.
+        Action viewAction = Action.newAction(
+                Action.TYPE_VIEW, // TODO: choose an action type.
+                "Main Page", // TODO: Define a title for the content shown.
+                // TODO: If you have web page content that matches this app activity's content,
+                // make sure this auto-generated web page URL is correct.
+                // Otherwise, set the URL to null.
+                Uri.parse("http://host/path"),
+                // TODO: Make sure this auto-generated app deep link URI is correct.
+                Uri.parse("android-app://icerapi.testaar/http/host/path")
+        );
+        AppIndex.AppIndexApi.end(client, viewAction);
+        client.disconnect();
+    }
+}
